@@ -2,11 +2,38 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
+class FunctionGrant(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="function_grants",
+    )
+    permission = models.CharField(max_length=80)
+    granted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "permission"],
+                name="uq_function_grant_user_permission",
+            )
+        ]
+        indexes = [models.Index(fields=["user", "permission"])]
+        ordering = ["permission"]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.permission}"
+
+
 class GoogleAccount(models.Model):
     email = models.EmailField(primary_key=True)
     credentials = models.JSONField()  # serialized google Credentials
     name = models.CharField(max_length=255, blank=True, default="")
     picture = models.URLField(blank=True, default="")
+
+    # V7.4.2 — Session invalidation: tokens issued before this timestamp
+    # are rejected. Set to now() on logout / account disable / password change.
+    token_valid_after = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.email

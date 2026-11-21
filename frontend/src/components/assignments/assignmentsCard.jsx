@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { post, del, get } from "/src/utils/api.js";
+import { post, del, get, safeExternalUrl } from "/src/utils/api.js";
 import { getTasks_Ring_BG_Color } from "/src/utils/color.js"
 import { FULL_DAYS } from "/src/utils/time.js";
 import SchoolIcon from '@mui/icons-material/School';
@@ -212,7 +212,7 @@ export function AssignmentsCard({ task, SubjectMap, onUpdateTask, color, groupLa
             <div className="p-4 min-w-0">
                 <div className="flex items-center justify-between gap-3">
                     <div className="text-sm opacity-80 truncate">
-                        <span className="tracking-wider">{subject.name || "Loading..."}</span>
+                        <span className="tracking-wider">{subject?.name || "Unknown Subject"}</span>
                         {task.assignment_alt_link && linked === true ? (
                             <span className="ml-2 text-xs px-2 py-0.4 rounded-full bg-neutral-800 border border-white/10">
                                 {lectureText && (
@@ -244,9 +244,9 @@ export function AssignmentsCard({ task, SubjectMap, onUpdateTask, color, groupLa
 
                 {/*Classroom link button*/}
                 <div className="mt-3 flex items-center gap-3">
-                    {task.assignment_alt_link && (
+                    {safeExternalUrl(task.assignment_alt_link) && (
                         <a
-                            href={task.assignment_alt_link}
+                            href={safeExternalUrl(task.assignment_alt_link)}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-[#18A15F] hover:bg-green-700 font-semibold"

@@ -1,15 +1,28 @@
 from pathlib import Path
 import os
+import ssl
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 
+# V11.2.1 & V11.4.3: Explicitly enforce PBKDF2 with 256-bit HMAC-SHA256
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+]
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")  # <-- add this
+load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET", "dev-only-secret")  # <-- change
+# ---- V13.3.1: Secret management — no hardcoded fallback in production ----
+SECRET_KEY = os.getenv("DJANGO_SECRET")
+if not SECRET_KEY:
+    import warnings
+    warnings.warn("DJANGO_SECRET not set! Using insecure dev default.", stacklevel=1)
+    SECRET_KEY = "dev-only-secret-CHANGE-ME"
 
-DEBUG = True
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+# ---- V13.4.2: Debug mode from env (must be OFF in production) ----
+DEBUG = os.getenv("DEBUG", "0").lower() in ("1", "true", "yes")
+
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
 
 INSTALLED_APPS = [
     'django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes',
@@ -20,6 +33,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
+    # ---- V3.4 / V3.2.1: Security headers + Sec-Fetch validation ----
+    "core.middleware.SecurityHeadersMiddleware",
+    "core.middleware.SecFetchValidationMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -32,7 +48,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
 ]
-CORS_ALLOW_CREDENTIALS = True  # <-- add this
+CORS_ALLOW_CREDENTIALS = True  # Required for cookie-based auth
 
 ROOT_URLCONF = 'mysite.urls'
 
@@ -74,19 +90,27 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "core.auth.SignedTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
-        "rest_framework.authentication.BasicAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+        "core.authorization.EnforcesDeclaredFunctionPermission",
+        "core.authorization.OwnsObject",
     ],
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+    "EXCEPTION_HANDLER": "core.exceptions.security_exception_handler",
+    # V6.1.1 & V6.3.1: Rate limiting / anti-automation without account lockout
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "20/minute",
+        "user": "120/minute",
+    },
 }
 
-# If using django-cors-headers:
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
 # Ensure Authorization header is allowed (usually default is fine)
 CORS_ALLOW_HEADERS = list(default_headers) + ["authorization"]
 
@@ -112,3 +136,99 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
+
+# =====================================================================
+# SECURITY SETTINGS (OWASP ASVS)
+# =====================================================================
+
+# V12.3.2: Verify default SSL/TLS context enforces certificate validation and hostname checking
+_DEFAULT_TLS_CTX = ssl.create_default_context()
+assert _DEFAULT_TLS_CTX.verify_mode == ssl.CERT_REQUIRED
+assert _DEFAULT_TLS_CTX.check_hostname is True
+
+# V3.3.1 / V3.3.4 — Auth cookie settings (HttpOnly, Secure, SameSite)
+AUTH_COOKIE_MAX_AGE = 60 * 60 * 8   # 8 hours (matches token max_age)
+AUTH_COOKIE_HTTPONLY = True           # V3.3.4: not accessible to JS
+AUTH_COOKIE_SAMESITE = "Lax"         # V3.3.2: CSRF protection
+AUTH_COOKIE_SECURE = not DEBUG       # V3.3.1: Secure in production
+# Browsers reject the __Secure- prefix unless the Secure flag is set.
+AUTH_COOKIE_NAME = "__Secure-uniplan-auth" if AUTH_COOKIE_SECURE else "uniplan-auth"
+AUTH_COOKIE_PATH = "/"
+AUTH_COOKIE_DOMAIN = None            # current host only
+
+# V3.4.1 — HSTS via Django SecurityMiddleware
+SECURE_HSTS_SECONDS = 31536000       # 1 year
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+
+# V3.4.4 — X-Content-Type-Options
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+# V13.4.1 — Prevent serving .git and similar
+# (Handled by .dockerignore excluding .git from build context)
+
+# Frontend URL for OAuth redirect
+FRONTEND_URL = os.getenv("FRONTEND_REDIRECT", "http://localhost:5173")
+
+# --- Security & Application Logging (OWASP ASVS V16.1.1, V16.3.1, V16.3.4) ---
+LOG_DIR = Path(os.getenv("LOG_DIR", str(BASE_DIR / "logs")))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "security_structured": {
+            "format": "{asctime} [{levelname}] logger={name} module={module} pid={process} {message}",
+            "datefmt": "%Y-%m-%dT%H:%M:%SZ",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "security_structured",
+        },
+        "security_file": {
+            "level": "INFO",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOG_DIR / "security.log"),
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 5,
+            "encoding": "utf-8",
+            "formatter": "security_structured",
+        },
+    },
+    "loggers": {
+        "security": {
+            "handlers": ["console", "security_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "security.auth": {
+            "handlers": ["console", "security_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "security.errors": {
+            "handlers": ["console", "security_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console", "security_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console", "security_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}

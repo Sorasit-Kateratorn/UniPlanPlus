@@ -1,69 +1,53 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import Button from "@mui/material/Button";
 import GoogleIcon from "@mui/icons-material/Google";
 import EventIcon from "@mui/icons-material/Event";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import SchoolIcon from "@mui/icons-material/School";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import uniplanLogo from "./assets/uniplanLogo.svg";
-import GppMaybeIcon from '@mui/icons-material/GppMaybe';
-import { Toasts } from '@/components/popup/Toasts';
+
+// V10.1.1 & V14.2.1: Token is stored in HttpOnly cookie (not accessible to JS).
+// Only non-sensitive display info (name, picture) is kept in localStorage.
 const auth = {
-  get token() { return localStorage.getItem("jwt"); },
-  set token(v) { v ? localStorage.setItem("jwt", v) : localStorage.removeItem("jwt"); },
+  // Token is in HttpOnly cookie — no JS access needed (V3.3.4)
   get user() { try { return JSON.parse(localStorage.getItem("user")); } catch { return null; } },
   set user(v) { v ? localStorage.setItem("user", JSON.stringify(v)) : localStorage.removeItem("user"); }
 };
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-async function getGoogleAuthUrl() {
-  const r = await fetch(`${BASE_URL}/api/auth/google/login`);
-  if (!r.ok) throw new Error("Failed to get Google auth URL");
-  return r.json(); // { auth_url }
-}
-
 export default function Login() {
   const navigate = useNavigate();
-  const [toasts, setToasts] = useState([]);
 
-
-  function pushToast({ type = "info", title, desc = "", duration = 3500, icon = null }) {
-    const id = (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()));
-    setToasts((t) => [...t, { id, type, title, desc, icon }]);
-    setTimeout(() => setToasts((t) => t.filter(x => x.id !== id)), duration)
-  }
-
-  // If we arrive with ?token=..., store and continue
+  // V10.1.1 & V14.2.1: Token is set in an HttpOnly cookie (and never exposed in URL query strings).
+  // We read non-sensitive display info (name, picture) from search/hash and scrub the URL immediately.
   useEffect(() => {
-    const qs = new URLSearchParams(window.location.search);
-    const token = qs.get("token");
-    if (token) {
+    const searchParams = new URLSearchParams(window.location.search);
+    const rawHash = window.location.hash ? window.location.hash.substring(1) : "";
+    const hashParams = new URLSearchParams(rawHash);
+
+    const loginSuccess = searchParams.get("login") === "success";
+    const hasFragmentToken = Boolean(hashParams.get("token"));
+
+    if (loginSuccess || hasFragmentToken) {
       const user = {
-        email: qs.get("email"),
-        name: qs.get("name"),
-        picture: qs.get("picture"),
+        name: searchParams.get("name") || hashParams.get("name"),
+        email: searchParams.get("email") || hashParams.get("email"),
+        picture: searchParams.get("picture") || hashParams.get("picture"),
       };
-      auth.token = token;
+      // Store only display info (not the token — that's in the HttpOnly cookie)
       auth.user = user;
-      // Clean the URL so the params don't linger
-      window.history.replaceState({}, "", "/login");
+      // Clean the URL immediately so fragment/params don't linger in browser history
+      window.history.replaceState({}, "", "/");
       navigate("/tableandtask", { replace: true });
     }
   }, [navigate]);
 
-  const onGoogleClick = async () => {
-    try {
-      const { auth_url } = await getGoogleAuthUrl();
-      window.location.href = auth_url;
-    } catch (e) {
-      pushToast({
-        type: "error",
-        title: "Sign-in failed",
-        desc: e?.message || "Could not start Google sign-in. Please try again.",
-        icon: <GppMaybeIcon sx={{ fontSize: 20 }} />
-      })
-    }
+  // Top-level navigation ensures the HttpOnly SameSite=Lax oauth_state cookie is set
+  // in a first-party context on the backend host (works from both localhost and 127.0.0.1).
+  const onGoogleClick = () => {
+    window.location.href = `${BASE_URL}/api/auth/google/login?redirect=1`;
   };
 
   return (
@@ -217,7 +201,6 @@ export default function Login() {
           © {new Date().getFullYear()} UniPlan · All rights reserved
         </div>
       </footer>
-      <Toasts toasts={toasts} setToasts={setToasts} />
     </div>
   );
 }
