@@ -148,11 +148,23 @@ Explicitly implemented in code via `SecurityHeadersMiddleware` and `SecFetchVali
 
 ### Item 14 — Static Application Security Testing (SAST) Report
 
-- **Status:** `[Pending]` — To be populated once SAST scan results (e.g., CodeQL / Semgrep / SonarQube) are completed and attached.
-- **Placeholder for Findings & Remediation Summary:**
-  - *Tool Used:* TBD
-  - *Scan Date & Scope:* TBD
-  - *Summary of Findings & Fixes:* TBD
+- **Status:** Complete (Scanned, All 17 Findings Remediated & Re-Verified to 0 Findings)
+- **Tool Used:** Semgrep CLI `v1.186.0` (`semgrep scan --config=auto`)
+- **Scan Date:** November 22, 2026
+- **Attached Reports:** [SAST_REPORT.md](SAST_REPORT.md) | [Semgrep_SAST_Report.json](Semgrep_SAST_Report.json)
+- **Scope:** Full Git-tracked repository (`508` security rules executed across `106` files, ~99.9% parsed lines: `39` Python files, `23` JS/React files, `1` TS file, `2` YAML workflows/compose files, `2` Dockerfiles, plus HTML/JSON).
+- **Overall Result:**
+  - **Application Code (`backend/` & `frontend/`):** **0 findings** on both initial and verification scans (zero SQLi, XSS, command injection, unsafe crypto, or auth flaws).
+  - **Initial Scan:** `17` findings (`6` Error / High, `11` Warning / Medium) across infrastructure, CI/CD, and a committed DAST report.
+  - **Post-Remediation Re-Scan:** **0 findings** (`0` Error, `0` Warning, `0` Info).
+
+#### SAST Findings & Remediations Summary
+
+| Rule / Finding | Severity | Target File | Instances | Status & Action Taken |
+| :--- | :---: | :--- | :---: | :--- |
+| `dockerfile.security.missing-user` (CWE-250) | **Error (High)** | `backend/Dockerfile` | 1 -> **0** | **Fixed & Verified:** Added non-root system user `appuser:appgroup`, set `/app` ownership, and enforced `USER appuser`. |
+| `generic.secrets.security.detected-jwt-token` (CWE-321) | **Error (High)** | `Zap_Report_Default_Policy.html` | 5 -> **0** | **Fixed & Verified:** Redacted all 5 captured test JWTs in the ZAP HTML report to `<REDACTED_JWT_TOKEN>`. |
+| `yaml.github-actions.security.github-actions-mutable-action-tag` (CWE-1357) | **Warning (Medium)** | `.github/workflows/fullstack-ci-cd.yml` | 11 -> **0** | **Fixed & Verified:** Pinned all 11 GitHub Action references (`checkout`, `setup-python`, `setup-node`, `docker/login-action`, `docker/build-push-action`) to verified 40-character commit SHAs. |
 
 ### Item 15 — Dynamic Application Security Testing (DAST) Report
 
@@ -164,6 +176,14 @@ Explicitly implemented in code via `SecurityHeadersMiddleware` and `SecFetchVali
 - **Targets Scanned:**
   - `http://127.0.0.1:8000` (Django REST backend API — authenticated with Bearer JWT via ZAP Replacer + `API` scan policy)
   - `http://127.0.0.1:5173` (React + Vite frontend — 6 endpoints crawled with `Default Policy`)
+- **Authenticated Scan Token Generation (`core.tokens`):**
+  ```bash
+  # Using Docker Compose
+  docker compose exec backend python manage.py shell -c "from core.tokens import issue_session_token; print(issue_session_token('your.email@gmail.com'))"
+
+  # Or locally inside backend/
+  python manage.py shell -c "from core.tokens import issue_session_token; print(issue_session_token('your.email@gmail.com'))"
+  ```
 - **Overall Result (Attached Reports):** **0 High / Critical vulnerabilities**, **3 Medium**, **1 Low**, **1 Informational** (**5 alert types total**, all on the local Vite dev server; **0 alerts** on the Django backend API after remediation). Zero injection (SQLi, XSS, command injection, path traversal) or broken access control vulnerabilities were detected.
 
 #### Summary by Site and Risk Level (Attached Reports)
@@ -297,7 +317,7 @@ From the rubric's advanced security feature options, UniPlanPlus implements the 
 | 11 | Error Handling | Custom `security_exception_handler` generic HTTP 500 JSON, `DEBUG=0` default | Complete |
 | 12 | Logging | Structured UTC logging (`security.auth`, `security.errors`) to rotating `security.log` + `stdout` | Complete |
 | 13 | HTTP Security Headers | `SecurityHeadersMiddleware` (HSTS, nosniff, CSP, Referrer-Policy, COOP, masked Server) + `SecFetchValidationMiddleware` | Complete |
-| 14 | SAST Tool Analysis & Report | *To be completed and attached by team* | **Pending** |
+| 14 | SAST Tool Analysis & Report | Semgrep CLI v1.186.0 (`--config=auto`, 508 rules, 106 files): 0 app-code findings; 17 infra/CI/report findings fixed & verified to **0 findings** ([SAST_REPORT.md](SAST_REPORT.md), [Semgrep_SAST_Report.json](Semgrep_SAST_Report.json)) | Complete |
 | 15 | DAST Tool Analysis & Report | OWASP ZAP v2.17.0 scans ([Zap_Report_API.html](Zap_Report_API.html): 0 alerts post-fix; [Zap_Report_Default_Policy.html](Zap_Report_Default_Policy.html): 0 High, 3 Med, 1 Low, 1 Info on Vite dev) | Complete |
 | 16 | Threat Model Implementation Mapping | STRIDE checklist mapping Done vs. Not Done (Prod-Deferred) mitigations in Section 5 | Complete |
 | 17 | Mapping to OWASP ASVS & Top 10 | 59/59 Planned ASVS v5.0 controls ([ASVS_COMPLIANCE.md](ASVS_COMPLIANCE.md)) + full OWASP Top 10 (2021) table | Complete |

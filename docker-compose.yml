@@ -47,6 +47,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - backend_logs:/app/logs
     working_dir: /app
     command: >
       sh -c "
@@ -101,6 +102,7 @@ services:
       ALLOWED_HOSTS: "*"
     volumes:
       - ./backend:/app
+      - backend_logs:/app/logs
     working_dir: /app
     command: >
       sh -c "
@@ -110,3 +112,4 @@ services:
 
 volumes:
   db_data:
+  backend_logs:
